@@ -1,0 +1,26 @@
+## Introduction
+
+This is a project dedicated for scatter correction for preclinical positron emission tomography (PET). We wish to train a deep-learning based scatter estimation model to outperform traditional single scatter simulation (SSS). The model should predict scatter sinograms from prompted sinograms (true + scatter). To train the model, we require Monte Carlo simulation that can produce distinct true and scatter bins. [MCGPU-PET](https://github.com/DIDSR/MCGPU-PET) is utilized to replace [GATE](http://www.opengatecollaboration.org/) as a faster backend Monte Carlo simulator. 
+
+To make the model generalize enough, we plan on generating dataset that varies across different phantoms and PET scanners. Also, currently, attenuation map is considered to be not used in training (since attenuation map may not always be acquirable in practice). 
+
+## Installation
+
+This project is run on Ubuntu 24.04
+
+**Prerequisite**
+- git
+- Mamba (conda)
+
+**Installation**
+
+```bash
+git clone https://github.com/electronics10/pet-correction.git
+cd pet-correction
+```
+
+```bash
+mamba env create -f environment.yml
+mamba activate pet-correction
+python test_parallelproj.py
+```
