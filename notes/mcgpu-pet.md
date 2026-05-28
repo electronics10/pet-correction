@@ -70,7 +70,7 @@ make
 (Compilation may succeeds with warnings, which are safe to ignore.)
 </details>
 
-### Usage
+### Basic IO
 
 After you get the `MCGPU-PET.x` binary file, it becomes an independent executive binary file (which serves as a MC PET simulator). That is to say, you can deploy the file to any places/projects without any worries, it would work fine on your computer. Personally, I used it as a backend for my Python project. According to the authors, the simulator takes in a `.in` file (`MCGPU-PET.in` in sample example) and is typically used by prompting 
 ```bash
