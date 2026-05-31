@@ -27,7 +27,7 @@ using the linear forward model
 """
 
 # %%
-import array_api_compat.torch as xp
+import array_api_compat.numpy as xp
 
 # import array_api_compat.cupy as xp
 # import array_api_compat.torch as xp
