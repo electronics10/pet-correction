@@ -1,1 +1,6 @@
+# pixi environments
+.pixi/*
+!.pixi/config.toml
+
+# developers
 *.npy

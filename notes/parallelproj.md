@@ -1,17 +1,29 @@
 ## Installation of parallelproj
-[Parallelproj](https://github.com/KUL-recon-lab/parallelproj) is an open-source project for tomographic reconstruction. 
 
-To install the package
-```bash
-mamba install parallelproj
-```
-or 
-```bash
-conda install -c conda-forge parallelproj
-```
-(Mamba is a reimplementation of the conda package manager in C++, which is more efficient.)
+[Parallelproj](https://github.com/KUL-recon-lab/parallelproj) is an open-source project for tomographic reconstruction. It is distributed only via conda-forge (not PyPI), because it ships compiled C and CUDA libraries that don't fit PyPI's wheel model well.
 
----
+Two install routes, depending on the personal preferences:
+
+**Pixi (project-local, recommended for new projects):**
+```bash
+# pixi add parallelproj                   # CPU build
+pixi add "python=3.12" parallelproj cupy "cuda-version=12.*"   # GPU build
+```
+For GPU, also add `cuda = "12"` under `[system-requirements]` in `pixi.toml` so the solver picks the CUDA variant.
+
+**Mamba/conda (global or named env):**
+```bash
+mamba install -c conda-forge parallelproj
+```
+Mamba is a faster C++ reimplementation of conda; they're interchangeable for install commands.
+
+**uv (does not work):** parallelproj is not on PyPI, so uv cannot install it.
+
+## GPU notes
+- The solver picks the CPU build by default. To get GPU support you must signal it explicitly (via `cupy` + `cuda-version`, or `system-requirements.cuda`).
+- For cupy, device is an **integer index** (`dev=0`), not the string `"cuda"`.
+- Use `array_api_compat.cupy` rather than raw `cupy` as the array namespace passed to parallelproj's `xp=` argument — it adds array-API conformance that parallelproj relies on (e.g. `device=` on `xp.eye`).
+
 
 ## Introduction to parallelproj
 Essentially, parallelproj is a library that gives you two operations:

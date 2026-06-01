@@ -5,22 +5,16 @@ This is a project dedicated for scatter correction for preclinical positron emis
 To make the model generalize enough, we plan on generating dataset that varies across different phantoms and PET scanners. Also, currently, attenuation map is considered to be not used in training (since attenuation map may not always be acquirable in practice). 
 
 ## Installation
+This project runs on Ubuntu 24.04 (other Linux should work; macOS/Windows untested).
 
-This project is run on Ubuntu 24.04
-
-**Prerequisite**
+**Prerequisites**
 - git
-- Mamba (conda)
+- [pixi](https://pixi.sh) (`curl -fsSL https://pixi.sh/install.sh | sh`)
+- an NVIDIA GPU with a driver supporting CUDA 12
 
-**Installation**
-
+**Setup**
 ```bash
 git clone https://github.com/electronics10/pet-correction.git
 cd pet-correction
-```
-
-```bash
-mamba env create -f environment.yml
-mamba activate pet-correction
-python test_parallelproj.py
+pixi install            # creates a project-local environment in .pixi/
 ```
