@@ -13,6 +13,7 @@ parallelproj = ">=1.10.2,<2"
 cupy = ">=14.1.0,<15"
 cuda-version = "12.*"
 matplotlib = ">=3.10.9,<4"
+scikit-image = ">=0.26.0,<0.27"
 
 [system-requirements]
 cuda = "12"

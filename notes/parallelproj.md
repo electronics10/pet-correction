@@ -460,4 +460,7 @@ print("Saved osem_compare.png")
 
 Two practical notes that fall straight out of the theory. First, the **product $n_{\text{subsets}} \times n_{\text{iter}}$** is the meaningful quantity — it's the total number of image updates, the rough equivalent of MLEM's iteration count; OSEM $5 \times 4$ and MLEM $20$ should look similar, but OSEM gets there in $\sim 4$ full data sweeps instead of $20$. Second, because of the **limit cycle**, running OSEM "longer" past convergence does not refine the image — it just cycles, and with many subsets and no relaxation the cycled images visibly degrade. Stop when the image stabilizes, or move to a relaxed variant (BSREM) if you need a guaranteed-convergent answer.
 
-The natural next step closes the loop back to the regularized objective $\min_x \,\|Ax - y\|^2_{\text{Poisson}} + \lambda R(x)\$, but we'll stop here for now.
+The natural next step closes the loop back to the regularized objective $\min_x \,\|Ax - y\|^2_{\text{Poisson}} + \lambda R(x)\$.
+
+TODO:
+1. scatter contamination

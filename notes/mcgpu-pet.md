@@ -1,4 +1,4 @@
-## Usage of MCGPU-PET
+## Prerequisite of MCGPU-PET
 [MCGPU-PET](https://github.com/DIDSR/MCGPU-PET.git) is a research code; the authors likely developed it by extending NVIDIA CUDA sample programs. Therefore, CUDA samples dependencies such as `helper_functions.h` are essential but not shipped with the distribution. Moreover, since GPU binaries are architecture-specific (unlike x86-64 CPU binaries), distributing a prebuilt `.x` binary is impractical.
 
 ### Installation
@@ -78,3 +78,65 @@ time ./MCGPU-PET.x MCGPU-PET.in | tee MCGPU-PET.out
 ```
 
 Note that the `.in` file requires a `.vox` file (simulation object such as a phantom) and some `.gz` files (materials). 
+
+
+## Python wrapper for MCGPU-PET
+
+To make MCGPU-PET more accessible and flexible, I am developing a Python wrapper for it called mcgpu_backend. First, create a folder `./mcgpu_backend` and a `__init__.py` in it. Also, put the binary `MCGPU-PET.x`, `template.in`, `template.vox`, and a folder of `materials` in it, and the basic components are all set.
+
+### A first run (no wrapper)
+
+Before designing anything, run MCGPU-PET and look at what falls out. The wrapper's design decisions all trace back to frictions we hit here.
+
+MCGPU-PET resolves the paths in the input file *relative to the current working directory*, and it writes its outputs into that same directory. The path of least resistance is therefore to make a fresh directory per run and pull the binary, the input file, the phantom, and the materials in by symlink or copy:
+
+```bash
+mkdir -p data/raw_run_1
+cd data/raw_run_1
+
+ln -s ../../mcgpu_backend/MCGPU-PET.x .
+ln -s ../../mcgpu_backend/materials  .
+cp ../../mcgpu_backend/template.in   MCGPU-PET.in
+cp ../../mcgpu_backend/template.vox  phantom.vox
+```
+
+Two conventions are already baked in: the input file is named `MCGPU-PET.in` (the README convention), and it references `phantom.vox` and `materials/...` by those exact names (open `template.in` to confirm). If the names in the directory don't match the strings inside the `.in` file, the binary either crashes or silently uses defaults. This is a constraint from MCGPU-PET.
+
+**To run:**
+
+```bash
+time ./MCGPU-PET.x MCGPU-PET.in 2>&1 | tee MCGPU-PET.out
+```
+
+The `tee` saves a log alongside the outputs. MCGPU-PET prints the resolved geometry, the counts, and any warnings to stdout.
+
+**What comes out:**
+
+A single run with the default template produces:
+
+| File | Format | Content |
+|---|---|---|
+| `image_Trues.raw.gz`   | gzipped `int32`, shape $(N_z, N_y, N_x)$ | per-voxel count of *true* coincidences emitted from that voxel |
+| `image_Scatter.raw.gz` | same | same, for scattered coincidences |
+| `sinogram_Trues.raw.gz`   | gzipped `int32`, flat buffer | trues binned into a 3D PET sinogram (michelogram) |
+| `sinogram_Scatter.raw.gz` | same | same, for scatter |
+| `Energy_Sinogram_Spectrum.dat` | text | energy spectrum of detected events |
+| `MCGPU-PET.out` | text | our tee'd log |
+
+
+**Emission images** are *not* reconstructions. They are forward tallies — for each voxel, the count of coincidences within the energy window that *originated* there. A real scanner cannot observe this; only the simulator can. They're useful as a sanity check (Trues + Scatter should approximate the input activity map, Poisson-noisy and sensitivity-weighted) and as a ground-truth reference, but not as data we feed into reconstruction.
+
+**Energy spectrum** is a text file we don't use downstream; mentioned for completeness.
+
+**Sinograms** are what reconstruction acts on. They're written as a single flat `int32` stream whose 3D layout is dictated by the `SINOGRAM PARAMETERS` block in the `.in` file — specifically `num_rings`, `MRD`, and `span`.
+
+**Problems:**
+
+From the above example, it is clear that there are a few problems that need to be deal with:
+1. We need a wrapper that can make the call of a run easier for later machine learning data generation pipeline.
+2. We need a `.in` file generator based on a specified configuration that can probably be shared with ML and reconstruction (parallelproj) usage.
+3. We need a `.vox` generator.
+4. We need to know the format of the sinogram output and how to convert them to be suitable for training and reconstruction.
+
+### Runner
+Instead of bash, we write a callabe runnner object that take in the path of a directory, run the simulation, and store the output in the directory. 
