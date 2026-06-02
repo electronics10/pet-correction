@@ -4,5 +4,5 @@
 
 # developers
 *.npy
-./data/
+data
 **/__pycache__/

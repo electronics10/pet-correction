@@ -1,0 +1,50 @@
+{
+  "geometry": {
+  "scanner_radius_mm": 90.5,
+  "num_crystals_per_ring": 336,
+  "num_rings": 80,
+  "axial_fov_mm": 126.56,
+  "radial_trim": 95,
+  "num_radial_bins": 147,
+  "num_angular_bins": 168,
+  "max_ring_difference": 79,
+  "span": 11,
+  "img_shape": [147, 147, 80],
+  "voxel_size_mm": [1.0, 1.0, 1.0]
+},
+  "mcgpu": {
+    "random_seed": 0,
+    "gpu_number": 0,
+    "gpu_threads_per_block": 32,
+    "density_scale_factor": 1.0,
+
+    "acquisition_time_s": 100.0,
+    "isotope_mean_life_s": 70000.0,
+
+    "psf_filename": "MCGPU_PET.psf",
+    "psf_max_elements": 150000000,
+    "report_trues_scatter": 0,
+    "report_psf_sinogram": 0,
+
+    "tally_material_dose": "YES",
+    "tally_voxel_dose": "NO",
+    "dose_filename": "mc-gpu_dose.dat",
+    "dose_roi_x": [1, 147],
+    "dose_roi_y": [1, 147],
+    "dose_roi_z": [1, 159],
+
+    "energy_resolution": 0.12,
+    "energy_window_low_eV": 350000.0,
+    "energy_window_high_eV": 600000.0,
+
+    "tally_image_resolution": 128,
+    "tally_num_z_slices": 159,
+    "num_energy_bins": 700,
+
+    "phantom_file": "phantom.vox",
+    "materials": [
+      "materials/air_5-515keV.mcgpu.gz",
+      "materials/water_5-515keV.mcgpu.gz"
+    ]
+  }
+}

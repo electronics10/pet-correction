@@ -1,4 +1,4 @@
-## Prerequisite of MCGPU-PET
+## Prerequisite for MCGPU-PET
 [MCGPU-PET](https://github.com/DIDSR/MCGPU-PET.git) is a research code; the authors likely developed it by extending NVIDIA CUDA sample programs. Therefore, CUDA samples dependencies such as `helper_functions.h` are essential but not shipped with the distribution. Moreover, since GPU binaries are architecture-specific (unlike x86-64 CPU binaries), distributing a prebuilt `.x` binary is impractical.
 
 ### Installation
@@ -82,7 +82,7 @@ Note that the `.in` file requires a `.vox` file (simulation object such as a pha
 
 ## Python wrapper for MCGPU-PET
 
-To make MCGPU-PET more accessible and flexible, I am developing a Python wrapper for it called mcgpu_backend. First, create a folder `./mcgpu_backend` and a `__init__.py` in it. Also, put the binary `MCGPU-PET.x`, `template.in`, `template.vox`, and a folder of `materials` in it, and the basic components are all set.
+To make MCGPU-PET more accessible and flexible, I am developing a Python wrapper for it called mcgpu_backend. First, create a folder `./mcgpu_backend` and a `__init__.py` in it. Also, put the binary `MCGPU-PET.x`, `template.in` and `template.vox` in a `templates` folder, and a folder of `materials` in it, and the basic components are all set.
 
 ### A first run (no wrapper)
 
@@ -96,8 +96,8 @@ cd data/raw_run_1
 
 ln -s ../../mcgpu_backend/MCGPU-PET.x .
 ln -s ../../mcgpu_backend/materials  .
-cp ../../mcgpu_backend/template.in   MCGPU-PET.in
-cp ../../mcgpu_backend/template.vox  phantom.vox
+cp ../../mcgpu_backend/templates/template.in   MCGPU-PET.in
+cp ../../mcgpu_backend/templates/template.vox  phantom.vox
 ```
 
 Two conventions are already baked in: the input file is named `MCGPU-PET.in` (the README convention), and it references `phantom.vox` and `materials/...` by those exact names (open `template.in` to confirm). If the names in the directory don't match the strings inside the `.in` file, the binary either crashes or silently uses defaults. This is a constraint from MCGPU-PET.
@@ -128,7 +128,7 @@ A single run with the default template produces:
 
 **Energy spectrum** is a text file we don't use downstream; mentioned for completeness.
 
-**Sinograms** are what reconstruction acts on. They're written as a single flat `int32` stream whose 3D layout is dictated by the `SINOGRAM PARAMETERS` block in the `.in` file — specifically `num_rings`, `MRD`, and `span`.
+**Sinograms** are what reconstruction acts on. They're written as a single flat `int32` stream whose 3D layout is dictated by the `SINOGRAM PARAMETERS` block in the `.in` file — specifically `num_rings`, `MRD`, and `span`. The data format is something worth inspection and deal with in the later section.
 
 **Problems:**
 
@@ -139,138 +139,64 @@ From the above example, it is clear that there are a few problems that need to b
 4. We need to know the format of the sinogram output and how to convert them to be suitable for training and reconstruction.
 
 ### Runner
-Instead of bash, we write a callabe runnner object that take in the path of a directory, run the simulation, and store the output in the directory. 
+Instead of bash, we write a callabe runnner object that take in the path of a directory, run the simulation, and store the output in the directory. Then, create a folder `./data/run_0` and copy `template.in` and `template.vox` inside, change their names to `MCGPU-PET.in` and `phantom.vox`. 
 
 ```python
-# ./mcgpu_backend/runner.py
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Optional
-import subprocess
-import threading
-import time
-
-PKG_DIR = Path(__file__).parent  # where MCGPU-PET.x and materials/ live
-
-
-@dataclass
-class RunResult:
-    run_dir: Path
-    image_trues: Path
-    image_scatter: Path
-    sinogram_trues: Path
-    sinogram_scatter: Path
-    energy_spectrum: Path
-    log: Path
-    wall_time_s: float
-    returncode: int
-
-
-class Runner:
-    def __init__(self, binary=PKG_DIR / "MCGPU-PET.x", materials=PKG_DIR / "materials"):
-        self.binary, self.materials = Path(binary), Path(materials)
-
-    def __call__(
-        self,
-        run_dir,
-        on_existing: Literal["error", "overwrite", "skip"] = "error",
-        verbose: bool = True,
-        timeout_s: Optional[float] = 3600,
-    ) -> RunResult:
-        run_dir = Path(run_dir)
-        if not run_dir.exists():
-            raise FileNotFoundError(f"run_dir does not exist: {run_dir}")
-
-        existing = self._handle_existing(run_dir, on_existing)
-        if existing is not None:
-            return existing
-
-        self._stage(run_dir)
-        self._preflight(run_dir)
-        rc, dt = self._execute(run_dir, verbose, timeout_s)
-        return self._collect(run_dir, rc, dt)
-
-    def _stage(self, d):
-        for src, name in [(self.binary, "MCGPU-PET.x"), (self.materials, "materials")]:
-            link = d / name
-            if not link.exists():
-                link.symlink_to(src.resolve())
-
-    def _preflight(self, d):
-        required = ["MCGPU-PET.x", "MCGPU-PET.in", "phantom.vox", "materials"]
-        missing = [r for r in required if not (d / r).exists()]
-        if missing:
-            raise FileNotFoundError(f"Missing in {d}: {missing}")
-
-    def _execute(self, d, verbose, timeout_s):
-        log = d / "MCGPU-PET.out"
-        t0 = time.perf_counter()
-        with open(log, "w") as f:
-            p = subprocess.Popen(
-                ["./MCGPU-PET.x", "MCGPU-PET.in"],
-                cwd=d,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-            )
-            timer = threading.Timer(timeout_s, p.kill) if timeout_s else None
-            if timer:
-                timer.start()
-            try:
-                for line in p.stdout:
-                    if verbose:
-                        print(line, end="")
-                    f.write(line)
-                p.wait()
-            finally:
-                if timer:
-                    timer.cancel()
-        dt = time.perf_counter() - t0
-        if p.returncode < 0:  # negative returncode = killed by signal
-            raise RuntimeError(
-                f"Run exceeded {timeout_s}s, killed (signal {-p.returncode})"
-            )
-        return p.returncode, dt
-
-    def _collect(self, d, rc, dt):
-        expected = [
-            "image_Trues.raw.gz",
-            "image_Scatter.raw.gz",
-            "sinogram_Trues.raw.gz",
-            "sinogram_Scatter.raw.gz",
-            "Energy_Sinogram_Spectrum.dat",
-        ]
-        missing = [
-            f for f in expected
-            if not (d / f).exists() or (d / f).stat().st_size == 0
-        ]
-        if rc != 0 or missing:
-            raise RuntimeError(f"Run failed (rc={rc}); missing/empty: {missing}")
-        return RunResult(d, *(d / f for f in expected), d / "MCGPU-PET.out", dt, rc)
-
-    def _handle_existing(self, d, mode):
-        outputs = list(d.glob("*.raw.gz"))
-        if not outputs:
-            return None
-        if mode == "error":
-            raise FileExistsError(f"Outputs exist in {d}")
-        if mode == "skip":
-            return self._collect(d, rc=0, dt=0.0)
-        if mode == "overwrite":
-            for f in outputs + list(d.glob("*.dat")) + [d / "MCGPU-PET.out"]:
-                if f.exists():
-                    f.unlink()
-            return None
-        raise ValueError(f"unknown on_existing mode: {mode!r}")
-```
-
-Create a folder `./data/run_0` and copy `template.in` and `template.vox` inside, change their names to `MCGPU-PET.in` and `phantom.vox`. 
-
-```python
+import shutil
 from mcgpu_backend.runner import Runner
 
+
+# Create the running directory
+run_dir = Path("data/run_0")
+run_dir.mkdir(parents=True, exist_ok=True)
+
+# Copy the `.in` and `.vox` file into the running directory and change their name
+shutil.copy("./mcgpu_backend/templates/template.in", (run_dir / "MCGPU-PET.in"))
+shutil.copy("./mcgpu_backend/templates/template.vox", (run_dir / "phantom.vox"))
+
+# Run 
 run = Runner()
-result = run("data/run_0")
+result = run(run_dir, on_existing="skip")
+print(result.sinogram_trues, result.wall_time_s)
+```
+
+Naturally, the next thing to deal with is how to create the a configuration file (source of truth) that can be shared for reconstruction or ML and generate the `.in` file from it.
+
+### Configuration JSON and .in file generator
+
+The `.in` file for MCGPU-PET is quite static and difficult to both manipulate and access. Moreover, we need a source of truth to record the meta data of each simulation run, and this is where a `.json` file come in play. The design of the `json` file includes the geometry and the mcgpu specification. The idea of the geometry specification is to state the domain and the codomain of the operation (consider PET as an mathematical transformation) while the mcgpu specification complement the geometry by stating other parameters such as acquisition time and energy window, which are more physical-oriented.
+
+Copy the `template.json` file from `./mcgpu_backend/templates/` to the running directory `./data/run_1` as `conifg.json` and manually change the specifications.
+
+```python
+from pathlib import Path
+import shutil
+from mcgpu_backend.runner import Runner
+from mcgpu_backend.in_generator import InFileGenerator
+
+# Create the running directory
+run_dir = Path("data/run_1")
+run_dir.mkdir(parents=True, exist_ok=True)
+
+# Copy the `.json` file into the running directory and change the name
+shutil.copy("./mcgpu_backend/templates/template.json", (run_dir / "config.json"))
+
+# Manually change the specification in config.json as you want
+
+# Generate the `.in` file according to the configuration automatically
+config = InFileGenerator.load_config(run_dir / "config.json")
+gen = InFileGenerator()
+gen.from_config(config)
+out = gen.write(run_dir)
+print(f"Wrote {out}")
+
+# Copy the `.vox` file into the running directory and change the name
+shutil.copy("./mcgpu_backend/templates/template.vox", (run_dir / "phantom.vox"))
+
+# Run 
+run = Runner()
+result = run(run_dir, on_existing="skip")
 print(result.sinogram_trues, result.wall_time_s)
 ```
 
