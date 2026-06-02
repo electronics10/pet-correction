@@ -460,7 +460,130 @@ print("Saved osem_compare.png")
 
 Two practical notes that fall straight out of the theory. First, the **product $n_{\text{subsets}} \times n_{\text{iter}}$** is the meaningful quantity — it's the total number of image updates, the rough equivalent of MLEM's iteration count; OSEM $5 \times 4$ and MLEM $20$ should look similar, but OSEM gets there in $\sim 4$ full data sweeps instead of $20$. Second, because of the **limit cycle**, running OSEM "longer" past convergence does not refine the image — it just cycles, and with many subsets and no relaxation the cycled images visibly degrade. Stop when the image stabilizes, or move to a relaxed variant (BSREM) if you need a guaranteed-convergent answer.
 
-The natural next step closes the loop back to the regularized objective $\min_x \,\|Ax - y\|^2_{\text{Poisson}} + \lambda R(x)\$.
+### Scatter and Randoms (Contamination)
+
+#### Theory
+
+**Why the previous model was wrong.**
+
+MLEM/OSEM assumed $\bar y_i = (Ax)_i$ — the mean count in LOR $i$ is the line integral of activity. Real PET violates this in two systematic ways:
+
+- **Randoms.** Two photons from *different* annihilations arrive within the coincidence window. Their assigned LOR is meaningless — it does not connect to any emission. Rate scales like (singles rate)² × window length.
+- **Scatter.** One or both 511 keV photons Compton-scatter in the patient before detection, so the recorded LOR no longer points at the emission point. Typically 30–50% of counts in 3D PET, more for larger objects.
+
+Both add counts to LORs where no true emission produced them. Plug uncorrected data into MLEM and the algorithm explains those counts by *inventing* activity along the wrong lines → low-contrast haze, bright rims around the object, quantitative bias.
+
+There are also multiplicative effects: **attenuation** (photons absorbed *out* of the LOR) and **detector normalization** (per-LOR efficiency). Same conceptual fix — fold them into the forward model.
+
+**The corrected generative model.**
+
+$$y_i \sim \text{Poisson}(\bar y_i), \qquad \bar y_i = n_i\, a_i\, (Ax)_i + s_i + r_i$$
+
+- $n_i \in (0,\infty)$: detector-pair normalization (efficiency, geometric factors), from a normalization scan.
+- $a_i \in (0,1]$: attenuation factor, $a_i = e^{-\int_{\text{LOR}_i} \mu\,dl}$ from a CT-derived $\mu$-map.
+- $s_i \ge 0$: expected scatter in LOR $i$.
+- $r_i \ge 0$: expected randoms in LOR $i$.
+
+Logical status: **modeling assumption.** The fact that lets the Poisson machinery survive: a sum of independent Poissons is Poisson with rate equal to the sum. So if trues, scatter, and randoms are each Poisson, $y_i$ is too — the likelihood theory from MLEM still applies, unchanged in form.
+
+Notational compression: absorb $n,a$ into a modified forward operator $\tilde A$ with $\tilde A_{ij} = n_i a_i A_{ij}$. Then $\bar y = \tilde A x + c$ with **additive contamination** $c = s + r$.
+
+**The corrected MLEM update.**
+
+Re-derive: $L(x) = \sum_i\big[y_i \log(\tilde A x + c)_i - (\tilde A x + c)_i\big]$. The EM derivation is identical to before — $c$ is constant in $x$, it only enters through $\bar y_i$:
+
+$$\boxed{\; x_j^{(k+1)} = \frac{x_j^{(k)}}{\sum_i \tilde A_{ij}} \sum_i \tilde A_{ij}\, \frac{y_i}{(\tilde A x^{(k)})_i + c_i} \;}$$
+
+Two differences from plain MLEM:
+
+1. **Forward model carries $n, a$.** The sensitivity image is $\tilde A^T \mathbf 1 = A^T(n\odot a)$, not $A^T\mathbf 1$. (Using $\tilde A = M_{na}A$ with $M_{na}$ diagonal, so $\tilde A^T = A^T M_{na}$.)
+2. **Contamination sits in the denominator.** When the model fits perfectly the ratio is $1$ — but "the model" now includes $c$, so the algorithm correctly attributes those counts to scatter/randoms rather than to activity.
+
+**Where $c$ comes from.**
+
+The update needs $c$ as a known input. Estimating it is its own subproblem:
+
+- **Randoms — easy.** Acquire a *delayed-coincidence* sinogram in parallel: same window length, offset in time so no true coincidence can land in it. The delayed sinogram is an unbiased estimate of $r$. Typically smoothed for variance reduction before use.
+- **Scatter — hard.** Standard tool: **Single Scatter Simulation (SSS)** — model single Compton scatter using the current activity estimate $x$ and the $\mu$-map, integrating the Klein–Nishina cross-section over candidate scatter points. SSS gives the *shape* of the scatter sinogram up to a global scale; the scale is fit to "tails" outside the object support (where activity contributes nothing, so all counts must be $s+r$).
+
+Logical status: SSS is a **physics-based heuristic** with its own modeling errors. Multiple scatter and out-of-FOV scatter are usually lumped into the scale fit. Bad scatter estimates create bias that *looks like* a real reconstruction artifact — the reconstruction has no way to flag this, it just trusts $c$. This is the part of the pipeline that's *least* like clean math and *most* like engineering; typically you iterate (SSS uses $x$, $x$ is updated by reconstruction, repeat 1–2 times).
+
+**Regularization**
+
+With contamination, the iterative-recon problem reads
+$$\min_{x\ge 0}\; D_{\mathrm{KL}}\!\big(y \,\|\, \tilde A x + c\big) \;+\; \lambda R(x),$$
+where $D_{\mathrm{KL}}$ is the Poisson (generalized Kullback–Leibler) divergence — the negative log-likelihood up to $x$-independent terms, $D_{\mathrm{KL}}(y\|\bar y) = \sum_i [y_i\log(y_i/\bar y_i) - y_i + \bar y_i]$. MAP-EM / regularized OSEM solve this with the same update plus a regularizer term. That's the natural next section.
+
+#### Practice
+
+The code change from MLEM is small: add `contamination` to the predicted sinogram in the denominator, and use $\tilde A$-aware sensitivity. In a real workflow, `mult_correction = n * a` comes from a normalization file and a forward-projected $\mu$-map; here it's passed in as a sinogram-shaped array to keep the function geometry-agnostic.
+
+```python
+def mlem_with_contamination(
+    proj, y,
+    contamination,            # c = s + r  (sinogram shape)
+    mult_correction=None,     # n * a, multiplicative LOR factors; None → ones
+    n_iter=20, x0=None, eps=1e-9,
+):
+    """MLEM under  y ~ Poisson( (n*a) * (A x) + s + r ).
+
+    Effective forward operator:  A_tilde(x) = mult_correction * proj(x).
+    Sensitivity image:           A^T(mult_correction).
+    """
+    img_shape = proj.in_shape
+    if mult_correction is None:
+        mult_correction = np.ones_like(y, dtype=np.float32)
+
+    # sensitivity:  A_tilde^T 1  =  A^T(n*a)
+    sens = np.maximum(proj.adjoint(mult_correction), eps)
+
+    x = np.ones(img_shape, dtype=np.float32) if x0 is None else x0.copy()
+
+    for k in range(n_iter):
+        ybar = mult_correction * proj(x) + contamination     # full forward model
+        ybar = np.maximum(ybar, eps)
+        ratio = y / ybar
+        # adjoint of A_tilde:  A^T(mult_correction * ratio)
+        correction = proj.adjoint(mult_correction * ratio)
+        x = x * correction / sens
+    return x
+```
+
+To test without scanner files, *simulate* a contaminated dataset by running the forward model in the generative direction, then Poisson-sample. Three reconstructions — ignoring $c$, modeling $c$ correctly, modeling $c$ with the wrong scale — make the failure modes visible.
+
+```python
+rng = np.random.default_rng(0)
+
+# 1. Multiplicative factors. Real n from normalization scan; real a from CT mu-map
+#    forward-projected by the same proj. Here: uniform efficiency, mild flat attenuation.
+attn = 0.6 * np.ones_like(sinogram, dtype=np.float32)
+norm = np.ones_like(sinogram, dtype=np.float32)
+mult = attn * norm
+
+# 2. Scale activity so counts are realistic; reconstruction will recover phantom * 1e3.
+true_counts  = mult * proj(phantom * 1e3)
+scatter_mean = 0.35 * true_counts.mean() * np.ones_like(sinogram)   # ~uniform scatter floor
+randoms_mean = 0.10 * true_counts.mean() * np.ones_like(sinogram)
+
+# 3. Poisson-sample the total.
+y_noisy = rng.poisson(true_counts + scatter_mean + randoms_mean).astype(np.float32)
+
+# --- three reconstructions ---
+recon_naive   = mlem(proj, y_noisy, n_iter=20)                       # ignores c
+recon_correct = mlem_with_contamination(
+    proj, y_noisy,
+    contamination=scatter_mean + randoms_mean,
+    mult_correction=mult, n_iter=20,
+)
+recon_wrong_c = mlem_with_contamination(
+    proj, y_noisy,
+    contamination=0.5 * (scatter_mean + randoms_mean),               # underestimate
+    mult_correction=mult, n_iter=20,
+)
+```
+
+What to look for when you display the three side by side. `recon_naive` shows the predicted failure mode: low-contrast haze inside the FOV and a bright rim at the object boundary — activity invented to explain the extra counts. `recon_correct` recovers contrast. `recon_wrong_c` (under-estimated $c$) sits between them: biased but graceful. Running the same experiment with `1.5 *` instead of `0.5 *` produces qualitatively *worse* artifacts — cold patches and edge dips — confirming the asymmetry flagged in the theory.
 
 TODO:
-1. scatter contamination
+1. **Attenuation maps from CT.** Compute $a_i = \exp(-(A\mu)_i)$ where $\mu$ is the rescaled $\mu$-map (CT energies → 511 keV); pitfalls in the rescaling (bone, contrast agents).
+2. **MAP-EM / penalized likelihood.** Add $R(x)$ (quadratic, TV, relative-difference prior) to the objective and derive the modified multiplicative update — closes the loop with the regularized-objective framing from the FBP section.
