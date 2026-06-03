@@ -8,7 +8,7 @@
   "num_radial_bins": 147,
   "num_angular_bins": 168,
   "max_ring_difference": 79,
-  "span": 11,
+  "span": 1,
   "img_shape": [147, 147, 80],
   "voxel_size_mm": [1.0, 1.0, 1.0]
 },
