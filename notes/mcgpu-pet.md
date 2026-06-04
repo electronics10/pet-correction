@@ -772,7 +772,8 @@ class VoxFileGenerator:
         payload = header + body
 
         if gzipped:
-            with gzip.open(out_path, "wt") as f:
+            with gzip.open(out_path, "wt") 
+            as f:
                 f.write(payload)
         else: out_path.write_text(payload)
 

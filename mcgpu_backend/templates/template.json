@@ -9,7 +9,7 @@
   "num_angular_bins": 168,
   "max_ring_difference": 79,
   "span": 1,
-  "img_shape": [147, 147, 80],
+  "img_shape": [147, 147, 159],
   "voxel_size_mm": [1.0, 1.0, 1.0]
 },
   "mcgpu": {
@@ -29,8 +29,8 @@
     "tally_material_dose": "YES",
     "tally_voxel_dose": "NO",
     "dose_filename": "mc-gpu_dose.dat",
-    "dose_roi_x": [1, 147],
-    "dose_roi_y": [1, 147],
+    "dose_roi_x": [1, 128],
+    "dose_roi_y": [1, 128],
     "dose_roi_z": [1, 159],
 
     "energy_resolution": 0.12,
