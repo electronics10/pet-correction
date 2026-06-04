@@ -699,12 +699,89 @@ class Phantom:
     material_names: list[str] = field(default_factory=list)  # bookkeeping
 ```
 
-Note that density is not determined by the material. This is because...
+Note that density is not determined by the material. This is because, to my understanding, by material, MCGPU-PET actually mean something like $\mu/\rho$ ( is the linear attenuation coefficient and $\rho$ is the density). To be more precise, $\mu/\rho = \frac{Z}{A}N_A\sigma$, which is exactly specified by the material in microscopic scale (and energy).
 
 #### VoxFileGenerator
 ```python
+# mcgpu_backend/vox_generator.py
+from mcgpu_backend.phantom import Phantom
+from pathlib import Path
+import gzip
 
+
+class VoxFileGenerator:
+    
+    def __init__(self, phantom: Phantom):
+        phantom.validate()
+        self.phantom = phantom
+
+    def _build_header(self) -> str:
+        nx, ny, nz = self.phantom.shape_xyz
+        dx_cm, dy_cm, dz_cm = (d / 10.0 for d in self.phantom.voxel_size_mm)
+        # Match the spacing/comment style of the penEasy sample for readability.
+        lines = [
+            "[SECTION VOXELS HEADER v.2008-04-13]",
+            f"{nx} {ny} {nz}       No. OF VOXELS IN X,Y,Z",
+            f"{dx_cm:.6g} {dy_cm:.6g} {dz_cm:.6g}       VOXEL SIZE (cm) ALONG X,Y,Z",
+            "1                    COLUMN NUMBER WHERE MATERIAL ID IS LOCATED",
+            "2                    COLUMN NUMBER WHERE THE MASS DENSITY [g/cm3] IS LOCATED",
+            "0                    BLANK LINES AT END OF X,Y-CYCLES (1=YES,0=NO)",
+            "[END OF VXH SECTION]",
+            "",
+        ]
+        return "\n".join(lines)
+
+    def _build_body(self) -> str:
+        # Array is (Nz, Ny, Nx). ravel(order='C') gives last-axis-fastest = x-fastest.
+        mat = self.phantom.material_id.ravel(order="C")
+        rho = self.phantom.density.ravel(order="C")
+        act = self.phantom.activity.ravel(order="C")
+
+        # Compose lines efficiently. Plain join with newlines is dominant cost.
+        # Format: "<mat> <density:.6g> <activity:.6g>"
+        # Use numpy formatting only if very large; otherwise a list comp is fine.
+        n = mat.size
+        # Pre-format with vectorized string operations for speed
+        # (savetxt would also work but gives less control over formatting)
+        parts = [
+            f"{m} {d:.6g} {a:.6g}"
+            for m, d, a in zip(mat.tolist(), rho.tolist(), act.tolist())
+        ]
+        # Append trailing newline for cleanliness
+        return "\n".join(parts) + "\n"
+    
+    def write(
+        self,
+        run_dir: str | Path,
+        filename: str = "phantom.vox",
+        gzipped: bool = False,
+    ) -> Path:
+        """Write to run_dir/filename. Returns the written path.
+
+        If gzipped=True, automatically appends '.gz' to filename if not present.
+        """
+        run_dir = Path(run_dir)
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        if gzipped and not filename.endswith(".gz"):
+            filename = filename + ".gz"
+        out_path = run_dir / filename
+
+        header = self._build_header()
+        body = self._build_body()
+        payload = header + body
+
+        if gzipped:
+            with gzip.open(out_path, "wt") as f:
+                f.write(payload)
+        else: out_path.write_text(payload)
+
+        return out_path
 ```
+
+Run to check
+```python
+
 
 ##### Legacy
 For the first phantom, we implement the **NEMA NU 4-2008 Image Quality (IQ) phantom**. The NEMA standards define a small set of physical phantoms with fixed geometry that every preclinical PET scanner is benchmarked against, which is exactly why we want one: it gives us a phantom whose simulated results can be compared directly against published measurements (e.g. Table 1 and Fig. 4 of the MCGPU-PET paper, which validates on this same phantom). The IQ phantom is also geometrically simple — a PMMA cylinder with a uniform hot region, two cold inserts, and five hot rods of decreasing diameter — so it factors cleanly into a few primitive operations (`add_cylinder`, `add_sphere`, `fill_background`) that any future phantom will also need. Concretely, we'll build a `PhantomBuilder` exposing these primitives, a `nema_iq_preclinical(...)` factory that composes them into the standard IQ geometry with user-specified activity concentrations, and the `VoxFileGenerator` that writes the result. Once this works end-to-end, custom phantoms and (later) anatomical phantoms reduce to writing new factories against the same builder — the serialization, the simulation runner, and the configuration system don't change.

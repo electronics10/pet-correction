@@ -1,10 +1,16 @@
 # mcgpu_backend/vox_generator.py
-from mcgpu_backend.phantom import Phantom
+from .phantom import Phantom
 from pathlib import Path
+import gzip
 
 
 class VoxFileGenerator:
-    
+    """Write a Phantom to MCGPU-PET's .vox format.
+
+    The format is penEasy 2008 + a third column for activity (Bq/voxel).
+    Header + body, x-fastest order. Blank lines between x/y cycles are
+    optional; we omit them (BLANK LINES flag = 0) for a smaller file.
+    """
     def __init__(self, phantom: Phantom):
         phantom.validate()
         self.phantom = phantom
@@ -56,3 +62,29 @@ class VoxFileGenerator:
         """
         run_dir = Path(run_dir)
         run_dir.mkdir(parents=True, exist_ok=True)
+
+        if gzipped and not filename.endswith(".gz"):
+            filename = filename + ".gz"
+        out_path = run_dir / filename
+
+        header = self._build_header()
+        body = self._build_body()
+        payload = header + body
+
+        if gzipped:
+            with gzip.open(out_path, "wt") as f:
+                f.write(payload)
+        else: out_path.write_text(payload)
+
+        return out_path
+    
+
+if __name__ == "__main__":
+    import numpy as np
+
+    material = np.ones([9,9,9])
+    density = np.ones([9,9,9])
+    activity = np.ones([9,9,9])
+    voxel = (10,10,10)
+    phan = Phantom(material, density, activity, voxel)
+    vfg = VoxFileGenerator(phan)

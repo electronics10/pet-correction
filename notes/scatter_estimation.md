@@ -42,15 +42,13 @@ $$\mu = n_e\,\sigma,\qquad n_e = \rho\,\frac{Z}{A}\,N_A,$$
 
 where $\rho$ is mass density, $Z/A$ (material) is the atomic-number-to-mass-number ratio (close to $1/2$ for the light elements in tissue), and $N_A$ is Avogadro's number. The quantity $\mu$ is the **linear attenuation coefficient** (units: $\text{m}^{-1}$); its reciprocal $1/\mu$ is the **mean free path**, the average distance a photon travels before scattering once. For 511 keV photons in soft tissue $1/\mu \approx 10$ cm — comparable to the body itself, which is precisely why scatter is unavoidable in PET. (For a good geometry, a narrow beam and a detector that sees only unscattered photons, the scattered photons are considered as "lost". Thus $\mu$ is called the "attenuation" coefficient, which really isn't suitable for our case.)
 
-Your notes are accurate (and the 10 cm mean free path is right: $\mu_\text{water}\approx0.096\ \text{cm}^{-1}$ at 511 keV gives $1/\mu\approx10.4$ cm). Let me fill in the two stubs — SSS, then the ML philosophy — because the second only makes sense as a deliberate departure from the first.
-
 **5. Single Scatter Simulation (SSS) — the physics baseline.**
 
 The governing idea: assume every detected scattered coincidence arose from *exactly one* Compton event at a single point $S$ in the object. A true coincidence lies on the straight line joining the two detectors; a singly-scattered one follows a bent "dog-leg" path, so the recorded line of response does not pass through the annihilation. That mispositioning *is* the scatter background.
 
 ![alt text](image-2.png)
 
-SSS estimates the scatter on detector pair $(A,B)$ by integrating the contribution of every candidate scatter point $S$ over the object volume (status: the Watson formulation, a physics forward model, not an approximation in its own derivation — the approximations are itemized below):
+SSS estimates the scatter on detector pair $(A,B)$ by integrating the contribution of every candidate scatter point $S$ over the object volume (the Watson formulation, a physics forward model, not an approximation in its own derivation — the approximations are itemized below):
 
 $$S_{AB} = \int_{V_S}\! dV_S\ \underbrace{\mu_S}_{\substack{\text{scatter prob.}\\\text{per length}}}\ \underbrace{\frac{1}{\sigma_C}\frac{d\sigma_C}{d\Omega}\bigg|_{\theta_{ASB}}}_{\substack{\text{K–N angular}\\\text{probability}}}\ \underbrace{\frac{\sigma_{AS}\,\sigma_{BS}}{4\pi R_{AS}^2 R_{BS}^2}}_{\substack{\text{geometric}\\\text{detection}}}\ \big(I_{A\to S\to B} + I_{B\to S\to A}\big).$$
 
@@ -58,13 +56,13 @@ Defining the symbols: $\theta_{ASB}$ is the scatter angle subtended at $S$ by th
 
 What SSS requires as input: an activity estimate (usually a first, uncorrected reconstruction), an attenuation map $\mu(\mathbf{x})$, and the scanner geometry plus energy response. Its known weak points: (a) single scatter only — multiple-scatter (two or more Compton events) is ignored and patched afterward by scaling the model to the measured counts in the object-free "tails" of the sinogram; (b) it is iterative — scatter depends on the activity image, which depends on scatter correction, so you loop; (c) it hard-requires a trustworthy $\mu$-map.
 
-**Machine-learning based scatter estimation philosophy.**
+## Machine-learning based scatter estimation principle (Claude; Unverified)
 
-Your design is a deliberate inversion of all three weak points. SSS is a *forward* model: given $(a,\mu,\text{geom})$, compute $s$ by explicit integration. Your model is a learned *inverse-ish* map: given only the prompt sinogram $p=t+s$, predict $s$ directly, with the full Monte-Carlo scatter (all orders, all detector effects) as the training target.
+SSS is a *forward* model: given $(a,\mu,\text{geom})$, compute $s$ by explicit integration. A model is a learned *inverse-ish* map: given only the prompt sinogram $p=t+s$, predict $s$ directly, with the full Monte-Carlo scatter (all orders, all detector effects) as the training target.
 
-The conceptual bet has three parts, each justified by the physics you just wrote down:
+The conceptual bet has three:
 
-First, **the target is easy to represent.** Surviving scatter is small-angle, forward-peaked, low-frequency (sections 2–3). A smooth, slowly-varying field is exactly what a convolutional/attention network approximates with few parameters — far easier than the trues.
+First, **the target is easy to represent.** Surviving scatter is small-angle, forward-peaked, low-frequency. A smooth, slowly-varying field is exactly what a convolutional/attention network approximates with few parameters — far easier than the trues.
 
 Second, **the input already carries the object information that SSS gets from the $\mu$-map.** The trues $t$ are attenuation-weighted line integrals of the activity through the same electron-density field that produces the scatter. So $p$ implicitly encodes both $a$ and $\mu$ along every line. The model is betting it can recover the smooth functional $s = \mathcal{S}[a,\mu]$ from that implicit encoding, without you handing it $\mu$ explicitly. This is plausible *because* scatter depends mainly on path-integrated electron density, not on fine voxel detail — the very thing line integrals preserve.
 
@@ -77,5 +75,3 @@ The cost of the bet — state it plainly in your thesis, because reviewers will:
 So the clean research question your write-up is converging on: *can a network, given only the prompt sinogram and no attenuation map, match or beat SSS by exploiting full-physics MC labels — and over what distribution of objects does that hold before it fails?* The "over what distribution" clause is the contribution; the yes/no is almost certainly "yes, in-distribution."
 
 Want me to sketch the next two sections — how the scatter sinogram is actually formed from MC events (so you can validate your `.vox` pipeline against the smoothness/tail behavior SSS assumes), or the concrete train/eval protocol that would let you make the "beats SSS in-distribution, degrades OOD" claim rigorously?
-
-## Machine-learning based scatter estimation philosophy
